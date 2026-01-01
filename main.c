@@ -1,5 +1,17 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
 #include "chip8.h"
+
+u16 get_width() {
+	struct winsize w;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != 0) {
+		perror("ioctl");
+		exit(1);
+	}
+	return w.ws_col;
+}
 
 int main(int argc, char **argv)
 {
@@ -12,12 +24,16 @@ int main(int argc, char **argv)
     chip_init(&chip);
     chip_load(&chip, argv[1]);
 
-    while (1) {
+    int width = get_width();
+    if (width > DISPLAY_W)
+    	width = DISPLAY_W;
+
+    for (int i = 0; i < 100; i++) {
         if (!chip_cycle(&chip, 0))
             continue;
-        printf("\e[1;1H\e[2J");
+        //printf("\e[1;1H\e[2J");
         for (int y = 0; y < DISPLAY_H; y++) {
-            for (int x = 0; x < DISPLAY_W; x++)
+            for (int x = 0; x < width; x++)
                 if (DISPLAY_GET(chip.display, x, y))
                     putc('#', stdout);
                 else

@@ -67,6 +67,8 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
     u16   nn   = instruction & 0x00FF;
     u16  nnn   = instruction & 0x0FFF;
 
+    printf("(%03d) Executing instruction %#06X\n", (int)chip->pc, instruction);
+    
     // Execute
     u8 *v = chip->v; // Convenience
     bool redraw = false;
@@ -115,6 +117,7 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
         case 0x7:
             // 7XNN: Add NN to vX, without carry
             v[x] += nn;
+            break;
         case 0x8:
             // Arithmetic instructions, n conveniently also denotes which one!
             switch (n) {
@@ -190,6 +193,7 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
             u8 sx = v[x] % DISPLAY_W,
                sy = v[y] % DISPLAY_H;
             v[0xF] = 0;
+            printf("Drawing %d lines, starting at (%d,%d), where I=%d\n", (int)n, (int)sx, (int)sy, (int)chip->i);
 
             for (int r = 0; r < n; r++) {
                 if (sy+r >= DISPLAY_H)
@@ -202,7 +206,7 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
                         break;
 
                     u8 cur_pixel = DISPLAY_GET(chip->display, sx+c, sy+r);
-                    u8 new_pixel = (row & (0x80 >> c)) ? 1 : 0;
+                    u8 new_pixel = (row & (1 << c)) ? 1 : 0;
                     if (cur_pixel && new_pixel)
                         v[0xF] = 1;
                     
