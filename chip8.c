@@ -30,10 +30,13 @@ void chip_init(struct chip8 *chip)
     chip->sp = 0;
     chip->delay = 0;
     chip->sound = 0;
+    chip->timer = 0;
+    chip->debug = false;
 
     srand(time(NULL));
     memcpy(&chip->mem[font_addr], font, sizeof(font));
     memset(chip->display, 0x00, sizeof(chip->display));
+    memset(chip->v, 0x00, sizeof(chip->v));
 }
 
 void chip_load(struct chip8 *chip, const char *program)
@@ -52,7 +55,7 @@ void chip_load(struct chip8 *chip, const char *program)
     fclose(f);
 }
 
-bool chip_cycle(struct chip8 *chip, u16 key_mask)
+bool chip_cycle(struct chip8 *chip, u16 key_mask, u16 deltatime)
 {
     // Fetch
     u16 instruction = (chip->mem[chip->pc & 0xFFF] << 8) | chip->mem[(chip->pc+1) & 0xFFF];
@@ -67,7 +70,7 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
     u16   nn   = instruction & 0x00FF;
     u16  nnn   = instruction & 0x0FFF;
 
-    printf("(%03d) Executing instruction %#06X\n", (int)chip->pc, instruction);
+    if (chip->debug) printf("(%03d) Executing instruction %#06X\n", (int)chip->pc, instruction);
     
     // Execute
     u8 *v = chip->v; // Convenience
@@ -82,7 +85,7 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
                     break;
                 case 0x00EE:
                     // Return from subroutine
-                    chip->pc = chip->stack[chip->sp--];
+                    chip->pc = chip->stack[--chip->sp];
                     break;
             }
             break;
@@ -144,29 +147,31 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
                     break;
                 case 0x5:
                     // 8XY5: Subtract, vX -= vY
-                    if (v[x] != v[y])
-                        v[0xF] = (v[x] > v[y]);
+                    u8 flag5 = (v[x] >= v[y]) ? 1 : 0;
                     v[x] -= v[y];
+                    v[0xF] = flag5;
                     break;
                 case 0x6:
                     // 8XY6: Shift, vX = vY >> 1, setting vF to the shifted out bit
                     // AMBIGUOUS!!! This is correct on CHIP8 but not on SUPER-CHIP
                     v[x] = v[y];
-                    v[0xF] = (v[x] & 0x1);
+                    u8 carry6 = (v[x] & 0x1);
                     v[x] >>= 1;
+                    v[0xF] = carry6;
                     break;
                 case 0x7:
                     // 8XY7: Subtract, vX = vY - vX
-                    if (v[x] != v[y])
-                        v[0xF] = (v[x] > v[y]);
+                    u8 flag8 = (v[y] >= v[x]) ? 1 : 0;
                     v[x] = v[y] - v[x];
+                    v[0xF] = flag8;
                     break;
                 case 0xE:
                     // 8XYE: Shift, vX = vY << 1, setting vF to the shifted out bit
                     // AMBIGUOUS!!! This is correct on CHIP8 but not on SUPER-CHIP
                     v[x] = v[y];
-                    v[0xF] = (v[x] & 0x80) >> 7;
+                    u8 carryE = (v[x] & 0x80) >> 7;
                     v[x] <<= 1;
+                    v[0xF] = carryE;
                     break;
             }
             break;
@@ -193,25 +198,24 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
             u8 sx = v[x] % DISPLAY_W,
                sy = v[y] % DISPLAY_H;
             v[0xF] = 0;
-            printf("Drawing %d lines, starting at (%d,%d), where I=%d\n", (int)n, (int)sx, (int)sy, (int)chip->i);
+            if (chip->debug) printf("Drawing %d lines, starting at (%d,%d), where I=%d\n", (int)n, (int)sx, (int)sy, (int)chip->i);
 
             for (int r = 0; r < n; r++) {
                 if (sy+r >= DISPLAY_H)
                     break;
                 
-                u8 row = chip->mem[chip->i + r];
+                u8 row = chip->mem[(chip->i + r) & 0xFFF];
+                u8 py = (sy+r) % DISPLAY_H;
                 
                 for (int c = 0; c < 8; c++) {
-                    if (sx+c >= DISPLAY_W)
-                        break;
+                    u8 px = (sx+c) % DISPLAY_W;
 
-                    u8 cur_pixel = DISPLAY_GET(chip->display, sx+c, sy+r);
-                    u8 new_pixel = (row & (1 << c)) ? 1 : 0;
+                    u8 cur_pixel = DISPLAY_GET(chip->display, px, py);
+                    u8 new_pixel = (row & (0x80 >> c)) ? 1 : 0;
                     if (cur_pixel && new_pixel)
                         v[0xF] = 1;
                     
-                    if (sx+c < DISPLAY_W)
-                        DISPLAY_WRITE(chip->display, sx+c, sy+r, new_pixel ^ cur_pixel);
+                    DISPLAY_WRITE(chip->display, px, py, new_pixel ^ cur_pixel);
                 }
             }
 
@@ -298,6 +302,14 @@ bool chip_cycle(struct chip8 *chip, u16 key_mask)
                         v[i] = chip->mem[chip->i + i];
                     break;
             }
+    }
+
+    // Timer logic
+    chip->timer += deltatime;
+    if (chip->timer >= 1000) {
+        chip->timer -= 1000;
+        if (chip->delay != 0) chip->delay--;
+        if (chip->sound != 0) chip->sound--;
     }
 
     return redraw;
